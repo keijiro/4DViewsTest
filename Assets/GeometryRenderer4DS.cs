@@ -85,7 +85,7 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
                 _dataSource.TextureSize,
                 _dataSource.TextureSize,
                 _dataSource.TextureFormat,
-                false
+                false, true
             ){
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear
