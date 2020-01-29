@@ -29,6 +29,8 @@ namespace Fdvfx
         Texture2D _texture;
         MaterialPropertyBlock _props;
 
+        RenderBuffer[] _mrt = new RenderBuffer[2];
+
         Material _bakeMaterial;
 
         (
@@ -207,18 +209,14 @@ namespace Fdvfx
 
             _props.SetTexture("_MainTex", _texture);
 
-            /*
-            Graphics.DrawMesh(
-                _mesh, transform.localToWorldMatrix,
-                _material, 0, null, 0, _props
-            );
-            */
-
             _bakeMaterial.SetVector("_TextureSize", new Vector2(_positionMap.width, _positionMap.height));
             _bakeMaterial.SetBuffer("_VertexArray", _bakeBuffer.vertex);
             _bakeMaterial.SetBuffer("_UVArray", _bakeBuffer.uv);
-            Graphics.Blit(null, _positionMap, _bakeMaterial, 0);
-            Graphics.Blit(null, _uvMap, _bakeMaterial, 1);
+
+            _mrt[0] = _positionMap.colorBuffer;
+            _mrt[1] = _uvMap.colorBuffer;
+            Graphics.SetRenderTarget(_mrt, _positionMap.depthBuffer);
+            Graphics.Blit(null, _bakeMaterial, 0);
             Graphics.Blit(_texture, _colorMap);
         }
 
