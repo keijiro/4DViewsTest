@@ -1,16 +1,22 @@
 using UnityEngine;
+using UnityEngine.Playables;
+using UnityEngine.Timeline;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using unity4dv;
 using IntPtr = System.IntPtr;
 
-public sealed class GeometryRenderer4DS : MonoBehaviour
+[ExecuteInEditMode]
+public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IPropertyPreview
 {
     [SerializeField] string _fileName = null;
     [SerializeField] Material _material = null;
+    [SerializeField] float _time = 0;
 
     DataSource4DS _dataSource;
-    int _lastModelID = -1;
+    int _totalFrames;
+    float _frameRate;
+    int _lastFrame = -1;
 
     Mesh _mesh;
     Texture2D _texture;
@@ -35,13 +41,19 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
 
         if (_mesh != null)
         {
-            Destroy(_mesh);
+            if (Application.isPlaying)
+                Destroy(_mesh);
+            else
+                DestroyImmediate(_mesh);
             _mesh = null;
         }
 
         if (_texture != null)
         {
-            Destroy(_texture);
+            if (Application.isPlaying)
+                Destroy(_texture);
+            else
+                DestroyImmediate(_texture);
             _texture = null;
         }
     }
@@ -62,8 +74,17 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
             _dataSource = DataSource4DS.CreateDataSource
                 (0, _fileName, true, "", 0, -1, OUT_RANGE_MODE.Stop);
 
-            Bridge4DS.Play(_dataSource.FDVUUID, true);
+            if (_dataSource == null) return;
 
+            _totalFrames = Bridge4DS.GetSequenceNbFrames(_dataSource.FDVUUID);
+            _frameRate = Bridge4DS.GetSequenceFramerate(_dataSource.FDVUUID);
+
+            Bridge4DS.SetSpeed(_dataSource.FDVUUID, 0);
+            Bridge4DS.Play(_dataSource.FDVUUID, true);
+        }
+
+        if (!_buffer.vertex.IsCreated)
+        {
             var vcount = _dataSource.MaxVertices;
             var icount = _dataSource.MaxTriangles * 3;
 
@@ -77,7 +98,11 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
             _buffer.texture = new NativeArray<   byte>(texsize, Allocator.Persistent);
         }
 
-        if (_mesh == null) _mesh = new Mesh();
+        if (_mesh == null)
+        {
+            _mesh = new Mesh();
+            _mesh.hideFlags = HideFlags.DontSave;
+        }
 
         if (_texture == null)
         {
@@ -88,7 +113,8 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
                 false, true
             ){
                 wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear
+                filterMode = FilterMode.Bilinear,
+                hideFlags = HideFlags.DontSave
             };
         }
 
@@ -96,27 +122,33 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
 
         if (_dataSource != null)
         {
-            int vertexCount = 0, indexCount = 0;
+            var frame = Mathf.Clamp((int)(_time * _frameRate), 0, _totalFrames - 1);
 
-            var modelID = Bridge4DS.UpdateModel(
-                _dataSource.FDVUUID,
-                (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.vertex),
-                (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.uv),
-                (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.index),
-                (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.texture),
-                (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.normal),
-                _lastModelID, ref vertexCount, ref indexCount
-            );
+            if (frame != _lastFrame)
+            {
+                Bridge4DS.GotoFrame(_dataSource.FDVUUID, frame);
 
-            _lastModelID = modelID;
+                int vertexCount = 0, indexCount = 0;
 
-            _mesh.SetVertices(_buffer.vertex);
-            _mesh.SetNormals(_buffer.normal);
-            _mesh.SetUVs(0, _buffer.uv);
-            _mesh.SetIndices(_buffer.index, MeshTopology.Triangles, 0);
+                var modelID = Bridge4DS.UpdateModel(
+                    _dataSource.FDVUUID,
+                    (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.vertex),
+                    (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.uv),
+                    (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.index),
+                    (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.texture),
+                    (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.normal),
+                    _lastFrame, ref vertexCount, ref indexCount
+                );
 
-            _texture.LoadRawTextureData(_buffer.texture);
-            _texture.Apply();
+                _mesh.SetVertices(_buffer.vertex); _mesh.SetNormals(_buffer.normal);
+                _mesh.SetUVs(0, _buffer.uv);
+                _mesh.SetIndices(_buffer.index, MeshTopology.Triangles, 0);
+
+                _texture.LoadRawTextureData(_buffer.texture);
+                _texture.Apply();
+
+                _lastFrame = frame;
+            }
         }
 
         _props.SetTexture("_MainTex", _texture);
@@ -126,4 +158,32 @@ public sealed class GeometryRenderer4DS : MonoBehaviour
             _material, 0, null, 0, _props
         );
     }
+
+    #region ITimeControl implementation
+
+    bool _externalTime;
+
+    public void OnControlTimeStart()
+    {
+    }
+
+    public void OnControlTimeStop()
+    {
+    }
+
+    public void SetTime(double time)
+    {
+        _time = (float)time;
+    }
+
+    #endregion
+
+    #region IPropertyPreview implementation
+
+    public void GatherProperties(PlayableDirector director, IPropertyCollector driver)
+    {
+        driver.AddFromName<GeometryRenderer4DS>(gameObject, "_time");
+    }
+
+    #endregion
 }
