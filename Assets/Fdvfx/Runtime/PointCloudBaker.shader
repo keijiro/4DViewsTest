@@ -1,4 +1,4 @@
-﻿Shader "Hidden/Converter"
+﻿Shader "Hidden/Fdvfx/PointCloudBaker"
 {
     CGINCLUDE
 

@@ -1,0 +1,16 @@
+fileFormatVersion: 2
+guid: 4812e0eee43a49c4db7d98cdf7bc91fd
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences:
+  - _material: {instanceID: 0}
+  - _positionMap: {instanceID: 0}
+  - _uvMap: {instanceID: 0}
+  - _colorMap: {instanceID: 0}
+  - _bakeShader: {fileID: 4800000, guid: 3f700fed888acc642a1c4b1e2b132092, type: 3}
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
