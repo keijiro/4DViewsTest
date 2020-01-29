@@ -11,58 +11,100 @@ namespace Fdvfx
     [ExecuteInEditMode]
     public sealed class VolumeRenderer : MonoBehaviour, ITimeControl, IPropertyPreview
     {
+        #region Editable attributes
+
+        [Space]
         [SerializeField] string _fileName = null;
-        [SerializeField] Material _material = null;
         [SerializeField] float _time = 0;
+        [Space]
+        [SerializeField] Material _surfaceMaterial = null;
+        [Space]
         [SerializeField] RenderTexture _positionMap = null;
+        [SerializeField] RenderTexture _normalMap = null;
         [SerializeField] RenderTexture _uvMap = null;
         [SerializeField] RenderTexture _colorMap = null;
 
+        #endregion
+
+        #region Hidden attribute
+
         [SerializeField, HideInInspector] Shader _bakeShader = null;
+
+        #endregion
+
+        #region Internal-use objects
 
         DataSource4DS _dataSource;
         int _totalFrames;
         float _frameRate;
         int _lastFrame = -1;
 
+        (NativeArray<Vector3> vertex,
+         NativeArray<Vector3> normal,
+         NativeArray<Vector2> uv,
+         NativeArray<int> index,
+         NativeArray<byte> texture) _sourceBuffer;
+
         Mesh _mesh;
         Texture2D _texture;
-        MaterialPropertyBlock _props;
+        MaterialPropertyBlock _overrides;
+
+        (ComputeBuffer vertex,
+         ComputeBuffer normal,
+         ComputeBuffer uv,
+         ComputeBuffer index) _bakeBuffer;
 
         RenderBuffer[] _mrt = new RenderBuffer[2];
-
         Material _bakeMaterial;
 
-        (
-            NativeArray<Vector3> vertex,
-            NativeArray<Vector3> normal,
-            NativeArray<Vector2> uv,
-            NativeArray<int> index,
-            NativeArray<byte> texture
-        )
-        _buffer;
+        #endregion
 
-        (
-            ComputeBuffer vertex,
-            ComputeBuffer normal,
-            ComputeBuffer uv,
-            ComputeBuffer index
-        )
-        _bakeBuffer;
+        #region Internal-use utility function
+
+        static void DestroySafely<T>(ref T obj) where T : Object
+        {
+            if (obj != null)
+            {
+                if (Application.isPlaying)
+                    Destroy(obj);
+                else
+                    DestroyImmediate(obj);
+            }
+            obj = null;
+        }
+
+        #endregion
+
+        #region ITimeControl implementation
+
+        public void OnControlTimeStart() {}
+        public void OnControlTimeStop() {}
+        public void SetTime(double time) => _time = (float)time;
+
+        #endregion
+
+        #region IPropertyPreview implementation
+
+        public void GatherProperties
+            (PlayableDirector director, IPropertyCollector driver)
+                => driver.AddFromName<VolumeRenderer>(gameObject, "_time");
+
+        #endregion
+
+        #region MonoBehaviour implementation
 
         void OnDisable()
         {
-            if (_buffer.vertex .IsCreated) _buffer.vertex .Dispose();
-            if (_buffer.normal .IsCreated) _buffer.normal .Dispose();
-            if (_buffer.uv     .IsCreated) _buffer.uv     .Dispose();
-            if (_buffer.index  .IsCreated) _buffer.index  .Dispose();
-            if (_buffer.texture.IsCreated) _buffer.texture.Dispose();
+            if (_sourceBuffer.vertex .IsCreated) _sourceBuffer.vertex .Dispose();
+            if (_sourceBuffer.normal .IsCreated) _sourceBuffer.normal .Dispose();
+            if (_sourceBuffer.uv     .IsCreated) _sourceBuffer.uv     .Dispose();
+            if (_sourceBuffer.index  .IsCreated) _sourceBuffer.index  .Dispose();
+            if (_sourceBuffer.texture.IsCreated) _sourceBuffer.texture.Dispose();
 
             _bakeBuffer.vertex?.Dispose();
             _bakeBuffer.normal?.Dispose();
             _bakeBuffer.uv    ?.Dispose();
             _bakeBuffer.index ?.Dispose();
-
             _bakeBuffer = (null, null, null, null);
         }
 
@@ -74,36 +116,14 @@ namespace Fdvfx
                 _dataSource = null;
             }
 
-            if (_mesh != null)
-            {
-                if (Application.isPlaying)
-                    Destroy(_mesh);
-                else
-                    DestroyImmediate(_mesh);
-                _mesh = null;
-            }
-
-            if (_texture != null)
-            {
-                if (Application.isPlaying)
-                    Destroy(_texture);
-                else
-                    DestroyImmediate(_texture);
-                _texture = null;
-            }
-
-            if (_bakeMaterial != null)
-            {
-                if (Application.isPlaying)
-                    Destroy(_bakeMaterial);
-                else
-                    DestroyImmediate(_bakeMaterial);
-                _bakeMaterial = null;
-            }
+            DestroySafely(ref _mesh);
+            DestroySafely(ref _texture);
+            DestroySafely(ref _bakeMaterial);
         }
 
         unsafe void Update()
         {
+            // Data source lazy initialization
             if (_dataSource == null)
             {
                 _dataSource = DataSource4DS.CreateDataSource
@@ -118,7 +138,7 @@ namespace Fdvfx
                 Bridge4DS.Play(_dataSource.FDVUUID, true);
             }
 
-            if (!_buffer.vertex.IsCreated)
+            if (!_sourceBuffer.vertex.IsCreated)
             {
                 var vcount = _dataSource.MaxVertices;
                 var icount = _dataSource.MaxTriangles * 3;
@@ -126,11 +146,11 @@ namespace Fdvfx
                 var texsize = _dataSource.TextureSize;
                 texsize = texsize * texsize / 2; 
 
-                _buffer.vertex  = new NativeArray<Vector3>( vcount, Allocator.Persistent);
-                _buffer.normal  = new NativeArray<Vector3>( vcount, Allocator.Persistent);
-                _buffer.uv      = new NativeArray<Vector2>( vcount, Allocator.Persistent);
-                _buffer.index   = new NativeArray<    int>( icount, Allocator.Persistent);
-                _buffer.texture = new NativeArray<   byte>(texsize, Allocator.Persistent);
+                _sourceBuffer.vertex  = new NativeArray<Vector3>( vcount, Allocator.Persistent);
+                _sourceBuffer.normal  = new NativeArray<Vector3>( vcount, Allocator.Persistent);
+                _sourceBuffer.uv      = new NativeArray<Vector2>( vcount, Allocator.Persistent);
+                _sourceBuffer.index   = new NativeArray<    int>( icount, Allocator.Persistent);
+                _sourceBuffer.texture = new NativeArray<   byte>(texsize, Allocator.Persistent);
             }
 
             if (_bakeBuffer.vertex == null)
@@ -164,7 +184,7 @@ namespace Fdvfx
                 };
             }
 
-            if (_props == null) _props = new MaterialPropertyBlock();
+            if (_overrides == null) _overrides = new MaterialPropertyBlock();
 
             if (_bakeMaterial == null)
                 _bakeMaterial =
@@ -182,32 +202,32 @@ namespace Fdvfx
 
                     var modelID = Bridge4DS.UpdateModel(
                         _dataSource.FDVUUID,
-                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.vertex),
-                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.uv),
-                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.index),
-                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.texture),
-                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_buffer.normal),
+                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_sourceBuffer.vertex),
+                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_sourceBuffer.uv),
+                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_sourceBuffer.index),
+                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_sourceBuffer.texture),
+                        (IntPtr)NativeArrayUnsafeUtility.GetUnsafePtr(_sourceBuffer.normal),
                         _lastFrame, ref vertexCount, ref indexCount
                     );
 
                     _bakeMaterial.SetInt("_VertexCount", vertexCount);
 
-                    _mesh.SetVertices(_buffer.vertex);
-                    _mesh.SetNormals(_buffer.normal);
-                    _mesh.SetUVs(0, _buffer.uv);
-                    _mesh.SetIndices(_buffer.index, MeshTopology.Triangles, 0);
+                    _mesh.SetVertices(_sourceBuffer.vertex);
+                    _mesh.SetNormals(_sourceBuffer.normal);
+                    _mesh.SetUVs(0, _sourceBuffer.uv);
+                    _mesh.SetIndices(_sourceBuffer.index, MeshTopology.Triangles, 0);
 
-                    _texture.LoadRawTextureData(_buffer.texture);
+                    _texture.LoadRawTextureData(_sourceBuffer.texture);
                     _texture.Apply();
 
-                    _bakeBuffer.vertex.SetData(_buffer.vertex);
-                    _bakeBuffer.uv.SetData(_buffer.uv);
+                    _bakeBuffer.vertex.SetData(_sourceBuffer.vertex);
+                    _bakeBuffer.uv.SetData(_sourceBuffer.uv);
 
                     _lastFrame = frame;
                 }
             }
 
-            _props.SetTexture("_MainTex", _texture);
+            _overrides.SetTexture("_MainTex", _texture);
 
             _bakeMaterial.SetVector("_TextureSize", new Vector2(_positionMap.width, _positionMap.height));
             _bakeMaterial.SetBuffer("_VertexArray", _bakeBuffer.vertex);
@@ -218,32 +238,12 @@ namespace Fdvfx
             Graphics.SetRenderTarget(_mrt, _positionMap.depthBuffer);
             Graphics.Blit(null, _bakeMaterial, 0);
             Graphics.Blit(_texture, _colorMap);
-        }
 
-        #region ITimeControl implementation
-
-        bool _externalTime;
-
-        public void OnControlTimeStart()
-        {
-        }
-
-        public void OnControlTimeStop()
-        {
-        }
-
-        public void SetTime(double time)
-        {
-            _time = (float)time;
-        }
-
-        #endregion
-
-        #region IPropertyPreview implementation
-
-        public void GatherProperties(PlayableDirector director, IPropertyCollector driver)
-        {
-            driver.AddFromName<VolumeRenderer>(gameObject, "_time");
+            if (_surfaceMaterial != null)
+                Graphics.DrawMesh(
+                    _mesh, transform.localToWorldMatrix,
+                    _surfaceMaterial, gameObject.layer, null, 0, _overrides
+                );
         }
 
         #endregion
