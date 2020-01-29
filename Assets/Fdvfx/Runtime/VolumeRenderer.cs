@@ -17,6 +17,7 @@ namespace Fdvfx
         [SerializeField] string _fileName = null;
         [SerializeField] float _time = 0;
         [Space]
+        [SerializeField] bool _drawSurface = false;
         [SerializeField] Material _surfaceMaterial = null;
         [Space]
         [SerializeField] RenderTexture _positionMap = null;
@@ -59,7 +60,7 @@ namespace Fdvfx
          ComputeBuffer index) _bakeBuffer;
 
         // Objects for point cloud baking
-        RenderBuffer[] _mrt = new RenderBuffer[2];
+        RenderBuffer[] _mrt = new RenderBuffer[3];
         Material _bakeMaterial;
 
         #endregion
@@ -202,7 +203,7 @@ namespace Fdvfx
             if (frame != _lastFrame) ReceiveNewFrame(frame);
 
             // Draw the surface mesh.
-            if (_surfaceMaterial != null)
+            if (_drawSurface && _surfaceMaterial != null)
             {
                 _overrides.SetTexture("_MainTex", _texture);
 
@@ -251,6 +252,9 @@ namespace Fdvfx
             _bakeBuffer.vertex.SetData(_sourceBuffer.vertex);
             _bakeMaterial.SetBuffer("_VertexArray", _bakeBuffer.vertex);
 
+            _bakeBuffer.normal.SetData(_sourceBuffer.normal);
+            _bakeMaterial.SetBuffer("_NormalArray", _bakeBuffer.normal);
+
             _bakeBuffer.uv.SetData(_sourceBuffer.uv);
             _bakeMaterial.SetBuffer("_UVArray", _bakeBuffer.uv);
 
@@ -259,7 +263,8 @@ namespace Fdvfx
                 new Vector2(_positionMap.width, _positionMap.height));
 
             _mrt[0] = _positionMap.colorBuffer;
-            _mrt[1] = _uvMap.colorBuffer;
+            _mrt[1] = _normalMap.colorBuffer;
+            _mrt[2] = _uvMap.colorBuffer;
             Graphics.SetRenderTarget(_mrt, _positionMap.depthBuffer);
 
             Graphics.Blit(null, _bakeMaterial, 0);

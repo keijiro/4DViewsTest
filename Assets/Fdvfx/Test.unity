@@ -700,8 +700,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _fileName: Somersault_60fps_FILTERED_DESKTOP_STD.4ds
   _time: 0
+  _drawSurface: 1
   _surfaceMaterial: {fileID: 2100000, guid: 753e7086f91194e4b9d84a1b8633810b, type: 2}
   _positionMap: {fileID: 8400000, guid: 751a1ed64931224498238eb6529d5340, type: 2}
+  _normalMap: {fileID: 8400000, guid: e4802ac14a1730648833f1d930cdb7dd, type: 2}
   _uvMap: {fileID: 8400000, guid: 220e9161e4afef84eb90a9f76a784e5c, type: 2}
   _colorMap: {fileID: 8400000, guid: ad4e2d89813b51249ac2a83585a67a22, type: 2}
   _bakeShader: {fileID: 4800000, guid: 3f700fed888acc642a1c4b1e2b132092, type: 3}
