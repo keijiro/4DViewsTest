@@ -12,6 +12,10 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
     [SerializeField] string _fileName = null;
     [SerializeField] Material _material = null;
     [SerializeField] float _time = 0;
+    [SerializeField] RenderTexture _positionMap = null;
+    [SerializeField] RenderTexture _uvMap = null;
+    [SerializeField] RenderTexture _colorMap = null;
+    [SerializeField] Shader _bakeShader = null;
 
     DataSource4DS _dataSource;
     int _totalFrames;
@@ -22,6 +26,25 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
     Texture2D _texture;
     MaterialPropertyBlock _props;
 
+    Material _bakeMaterial;
+
+    (
+        NativeArray<Vector3> vertex,
+        NativeArray<Vector3> normal,
+        NativeArray<Vector2> uv,
+        NativeArray<int> index,
+        NativeArray<byte> texture
+    )
+    _buffer;
+
+    (
+        ComputeBuffer vertex,
+        ComputeBuffer normal,
+        ComputeBuffer uv,
+        ComputeBuffer index
+    )
+    _bakeBuffer;
+
     void OnDisable()
     {
         if (_buffer.vertex .IsCreated) _buffer.vertex .Dispose();
@@ -29,6 +52,13 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
         if (_buffer.uv     .IsCreated) _buffer.uv     .Dispose();
         if (_buffer.index  .IsCreated) _buffer.index  .Dispose();
         if (_buffer.texture.IsCreated) _buffer.texture.Dispose();
+
+        _bakeBuffer.vertex?.Dispose();
+        _bakeBuffer.normal?.Dispose();
+        _bakeBuffer.uv    ?.Dispose();
+        _bakeBuffer.index ?.Dispose();
+
+        _bakeBuffer = (null, null, null, null);
     }
 
     void OnDestroy()
@@ -56,16 +86,16 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
                 DestroyImmediate(_texture);
             _texture = null;
         }
-    }
 
-    (
-        NativeArray<Vector3> vertex,
-        NativeArray<Vector3> normal,
-        NativeArray<Vector2> uv,
-        NativeArray<int> index,
-        NativeArray<byte> texture
-    )
-    _buffer;
+        if (_bakeMaterial != null)
+        {
+            if (Application.isPlaying)
+                Destroy(_bakeMaterial);
+            else
+                DestroyImmediate(_bakeMaterial);
+            _bakeMaterial = null;
+        }
+    }
 
     unsafe void Update()
     {
@@ -98,6 +128,17 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
             _buffer.texture = new NativeArray<   byte>(texsize, Allocator.Persistent);
         }
 
+        if (_bakeBuffer.vertex == null)
+        {
+            var vcount = _dataSource.MaxVertices;
+            var tcount = _dataSource.MaxTriangles;
+
+            _bakeBuffer.vertex  = new ComputeBuffer(vcount * 3, sizeof(float));
+            _bakeBuffer.normal  = new ComputeBuffer(vcount * 3, sizeof(float));
+            _bakeBuffer.uv      = new ComputeBuffer(vcount * 2, sizeof(float));
+            _bakeBuffer.index   = new ComputeBuffer(tcount * 3, sizeof(int));
+        }
+
         if (_mesh == null)
         {
             _mesh = new Mesh();
@@ -120,6 +161,10 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
 
         if (_props == null) _props = new MaterialPropertyBlock();
 
+        if (_bakeMaterial == null)
+            _bakeMaterial =
+                new Material(_bakeShader){ hideFlags = HideFlags.DontSave };
+
         if (_dataSource != null)
         {
             var frame = Mathf.Clamp((int)(_time * _frameRate), 0, _totalFrames - 1);
@@ -140,12 +185,18 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
                     _lastFrame, ref vertexCount, ref indexCount
                 );
 
-                _mesh.SetVertices(_buffer.vertex); _mesh.SetNormals(_buffer.normal);
+                _bakeMaterial.SetInt("_VertexCount", vertexCount);
+
+                _mesh.SetVertices(_buffer.vertex);
+                _mesh.SetNormals(_buffer.normal);
                 _mesh.SetUVs(0, _buffer.uv);
                 _mesh.SetIndices(_buffer.index, MeshTopology.Triangles, 0);
 
                 _texture.LoadRawTextureData(_buffer.texture);
                 _texture.Apply();
+
+                _bakeBuffer.vertex.SetData(_buffer.vertex);
+                _bakeBuffer.uv.SetData(_buffer.uv);
 
                 _lastFrame = frame;
             }
@@ -153,10 +204,19 @@ public sealed class GeometryRenderer4DS : MonoBehaviour, ITimeControl, IProperty
 
         _props.SetTexture("_MainTex", _texture);
 
+        /*
         Graphics.DrawMesh(
             _mesh, transform.localToWorldMatrix,
             _material, 0, null, 0, _props
         );
+        */
+
+        _bakeMaterial.SetVector("_TextureSize", new Vector2(_positionMap.width, _positionMap.height));
+        _bakeMaterial.SetBuffer("_VertexArray", _bakeBuffer.vertex);
+        _bakeMaterial.SetBuffer("_UVArray", _bakeBuffer.uv);
+        Graphics.Blit(null, _positionMap, _bakeMaterial, 0);
+        Graphics.Blit(null, _uvMap, _bakeMaterial, 1);
+        Graphics.Blit(_texture, _colorMap);
     }
 
     #region ITimeControl implementation
