@@ -9,8 +9,10 @@
     }
   ],
   "dependencies": {
-    "com.unity.timeline": "1.2.10",
+    "com.unity.timeline": "1.2.12",
     "jp.keijiro.kino.post-processing": "2.1.11",
+    "jp.keijiro.klak.timeline.procedural-motion": "0.1.2",
+    "jp.keijiro.recorder.ffmpeg": "1.0.0",
     "jp.keijiro.test-assets": "1.0.1"
   }
 }
